@@ -224,9 +224,92 @@ function redeemGiftcode(player, giftcode)
 end
 
 -- ====================================================
--- 🚗 Receber veículo do client (registro simbólico)
+-- 🚗 Receber veículo do client e registrar no banco de dados
 -- ====================================================
 RegisterNetEvent('edge_giftcode:giveVehicle')
-AddEventHandler('edge_giftcode:giveVehicle', function(vehicleProps)
-    print("[Edge System] 🚗 Veículo entregue ao jogador. Registro completo via framework.")
+AddEventHandler('edge_giftcode:giveVehicle', function(vehicleProps, vehicleModel)
+    local src = source
+    
+    if not vehicleProps then
+        print("[Edge System] ❌ Propriedades do veículo não recebidas.")
+        return
+    end
+
+    print(("[Edge System] 🚗 Registrando veículo no banco de dados para o jogador %s"):format(GetPlayerName(src)))
+
+    if Config.Framework == 'ESX' then
+        local xPlayer = ESX.GetPlayerFromId(src)
+        if not xPlayer then
+            print("[Edge System] ❌ Jogador não encontrado (ESX).")
+            return
+        end
+
+        local plate = vehicleProps.plate
+        local identifier = xPlayer.identifier
+
+        local query = [[
+            INSERT INTO owned_vehicles (owner, plate, vehicle, stored, type, job)
+            VALUES (@owner, @plate, @vehicle, @stored, @type, @job)
+        ]]
+        
+        local params = {
+            ['@owner'] = identifier,
+            ['@plate'] = plate,
+            ['@vehicle'] = json.encode(vehicleProps),
+            ['@stored'] = 1,
+            ['@type'] = 'car',
+            ['@job'] = 'civ'
+        }
+
+        exports.oxmysql:execute(query, params, function(result)
+            if result then
+                print(("[Edge System] ✅ Veículo %s registrado no banco de dados (ESX) para %s (placa: %s)"):format(vehicleModel or 'desconhecido', xPlayer.getName(), plate))
+                TriggerClientEvent('ox_lib:notify', src, {
+                    description = Config.Notify['received_vehicle']:format(vehicleModel or 'veículo'),
+                    type = 'success'
+                })
+            else
+                print("[Edge System] ❌ Erro ao inserir veículo no banco de dados (ESX).")
+            end
+        end)
+
+    elseif Config.Framework == 'QBCore' then
+        local Player = QBCore.Functions.GetPlayer(src)
+        if not Player then
+            print("[Edge System] ❌ Jogador não encontrado (QBCore).")
+            return
+        end
+
+        local plate = vehicleProps.plate
+        local citizenid = Player.PlayerData.citizenid
+
+        local query = [[
+            INSERT INTO player_vehicles (license, citizenid, vehicle, hash, mods, plate, state)
+            VALUES (@license, @citizenid, @vehicle, @hash, @mods, @plate, @state)
+        ]]
+        
+        local params = {
+            ['@license'] = Player.PlayerData.license,
+            ['@citizenid'] = citizenid,
+            ['@vehicle'] = vehicleModel or 'unknown',
+            ['@hash'] = GetHashKey(vehicleModel or 'adder'),
+            ['@mods'] = json.encode(vehicleProps),
+            ['@plate'] = plate,
+            ['@state'] = 1
+        }
+
+        exports.oxmysql:execute(query, params, function(result)
+            if result then
+                print(("[Edge System] ✅ Veículo %s registrado no banco de dados (QBCore) para %s (placa: %s)"):format(vehicleModel or 'desconhecido', Player.PlayerData.name, plate))
+                TriggerClientEvent('ox_lib:notify', src, {
+                    description = Config.Notify['received_vehicle']:format(vehicleModel or 'veículo'),
+                    type = 'success'
+                })
+            else
+                print("[Edge System] ❌ Erro ao inserir veículo no banco de dados (QBCore).")
+            end
+        end)
+    else
+        print("[Edge System] ❌ Framework não detectado. Veículo não registrado.")
+    end
 end)
